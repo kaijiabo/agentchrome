@@ -210,6 +210,30 @@ nameInput.addEventListener("change", async () => {
 });
 nameInput.addEventListener("keydown", (e) => e.key === "Enter" && nameInput.blur());
 
+// Pairing code for another Chrome profile on the same account (made with this profile's device token).
+$("pairNew").onclick = async () => {
+  const btn = $<HTMLButtonElement>("pairNew");
+  $("pairNewError").hidden = true;
+  btn.disabled = true;
+  try {
+    const r = await send<any>({ type: "acm:pair-new" });
+    if (r?.error || !r?.code) throw new Error(r?.error ?? "Couldn't create a pairing code.");
+    $("pairCode").textContent = formatCode(r.code);
+    const mins = Math.max(1, Math.round((new Date(r.expiresAt).getTime() - Date.now()) / 60_000));
+    $("pairExpiry").textContent = `in ${mins} minute${mins === 1 ? "" : "s"}`;
+    $("pairBox").hidden = false;
+    btn.textContent = "New code";
+  } catch (err) {
+    showError("pairNewError", String((err as Error).message ?? err));
+  } finally {
+    btn.disabled = false;
+  }
+};
+$("copyPair").onclick = async () => {
+  await navigator.clipboard.writeText($("pairCode").textContent ?? "");
+  toast("Code copied");
+};
+
 $("unpair").onclick = async () => {
   if (!confirm("Disconnect this Chrome profile? Agents will no longer be able to use it until you pair it again.")) return;
   await send({ type: "acm:unpair" });

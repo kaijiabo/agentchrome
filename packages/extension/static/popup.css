@@ -153,3 +153,7 @@ body.prompt .actions{display:flex;flex-direction:column;gap:8px;margin-top:auto}
 #localView code{font-size:11px;background:var(--hover);padding:1px 5px;border-radius:5px}
 .or{display:flex;align-items:center;gap:10px;margin:16px 0 10px;font-size:11.5px;color:var(--muted)}
 .or::before,.or::after{content:"";flex:1;height:1px;background:var(--line)}
+
+.pair-code{display:flex;align-items:center;justify-content:space-between;gap:10px;height:48px;padding:0 8px 0 14px;border-radius:8px;box-shadow:inset 0 0 0 1px var(--line2)}
+.pair-code span{font:500 20px var(--mono);letter-spacing:.14em}
+.center{text-align:center}
