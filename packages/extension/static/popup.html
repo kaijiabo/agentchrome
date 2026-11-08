@@ -18,7 +18,8 @@
       <div id="pairError" class="alert" role="alert" hidden></div>
       <button id="signin" class="btn primary block lg" type="button">Sign in to connect</button>
       <p id="waiting" class="waiting muted small" hidden><span class="spin"></span>Finish signing in in the new tab…</p>
-      <div class="or"><span>or use the code from the installer</span></div>
+      <div class="or"><span>or enter a pairing code</span></div>
+      <p class="muted small center">Already connected another profile? Open Agent Chrome there and press <b>Connect another profile</b> to get a code.</p>
       <form id="codeForm" class="stack" autocomplete="off">
         <input id="cloudCode" class="code" placeholder="XXXXX-XXXXX" maxlength="11" spellcheck="false" autocapitalize="characters" aria-label="Pairing code">
         <div id="codeError" class="alert" role="alert" hidden></div>
@@ -71,6 +72,19 @@
         <textarea id="blocked" rows="3" placeholder="bank.example.com&#10;mail.example.com" spellcheck="false"></textarea>
         <p class="hint">One site per line. Subdomains are included.</p>
       </details>
+    </div>
+
+    <div class="section-head"><h2>Other profiles</h2></div>
+    <div class="stack">
+      <button id="pairNew" class="btn block" type="button">Connect another profile</button>
+      <div id="pairBox" class="stack" hidden>
+        <div class="pair-code" role="group" aria-label="Pairing code">
+          <span id="pairCode" class="mono"></span>
+          <button id="copyPair" class="chip" type="button">Copy</button>
+        </div>
+        <p class="muted small">In the other Chrome profile, open Agent Chrome and enter this code. It works once and expires <span id="pairExpiry">in 15 minutes</span>.</p>
+      </div>
+      <div id="pairNewError" class="alert" role="alert" hidden></div>
     </div>
 
     <div id="lastError" class="alert" role="alert" hidden></div>

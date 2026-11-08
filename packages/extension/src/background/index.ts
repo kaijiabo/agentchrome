@@ -250,6 +250,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
         return { ok: true };
       }
+      case "acm:pair-new": {
+        const c = await getConnection();
+        if (!c.server || !c.deviceToken) return { error: "Connect this profile first." };
+        const res = await fetch(`${c.server}/api/pair/new`, { method: "POST", headers: { authorization: `Bearer ${c.deviceToken}` } }).catch(() => null);
+        const body = res ? await res.json().catch(() => ({})) : {};
+        if (!res?.ok) return { error: (body as any).error ?? "Couldn't create a pairing code. Check your connection and try again." };
+        return { code: (body as any).code, expiresAt: (body as any).expiresAt };
+      }
       case "acm:reconnect":
         ws?.close(1000);
         ws = null;
