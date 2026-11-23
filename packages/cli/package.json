@@ -1,6 +1,6 @@
 {
   "name": "agentchrome",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Let every coding agent (Claude Code, Codex, Gemini, Antigravity, Grok, Muse, Cursor, opencode) drive your real Chrome profiles through a secure remote MCP server.",
   "type": "module",
   "bin": { "agentchrome": "dist/cli.mjs" },

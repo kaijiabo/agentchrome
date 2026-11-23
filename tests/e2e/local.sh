@@ -11,4 +11,4 @@ node "$CLI" serve --port $PORT > "$TMP/serve.log" 2>&1 &
 PID=$!
 trap 'kill $PID; rm -rf "$TMP"' EXIT
 for i in $(seq 1 30); do curl -sf "http://127.0.0.1:$PORT/health" >/dev/null && break; sleep 0.2; done
-ACM_SERVER="http://127.0.0.1:$PORT" node --test --test-concurrency=1 --test-timeout=240000 "$ROOT/tests/e2e/tools.test.mjs"
+ACM_SERVER="http://127.0.0.1:$PORT" node --test --test-concurrency=1 --test-timeout=240000 "$ROOT/tests/e2e/tools.test.mjs" "$ROOT/tests/e2e/private.test.mjs" "$ROOT/tests/e2e/cleanup.test.mjs"

@@ -2,7 +2,7 @@
 
 import { WS_SUBPROTOCOL, WS_TOKEN_PREFIX, type ServerToExtension } from "@agentchrome/protocol";
 import { getConnection, getSettings, resolvePrompt, setConnection, setSettings } from "./settings";
-import { allSessions, updateSession } from "./sessions";
+import { allSessions, sweepIdle, updateSession } from "./sessions";
 import { runTool, setPaused, setSessionPaused } from "./tools";
 import { onUserCancel } from "./cdp";
 
@@ -342,6 +342,7 @@ chrome.alarms.onAlarm.addListener((a) => {
     }
   }
   if (a.name === "acm-keepalive") pollConnect(); // resume after the service worker was suspended
+  if (a.name === "acm-keepalive") sweepIdle().catch(() => {});
 });
 chrome.runtime.onStartup.addListener(connect);
 chrome.runtime.onInstalled.addListener(async (d) => {
@@ -357,4 +358,5 @@ self.addEventListener("online", () => {
 
 // Test hook: lets automated end-to-end tests pair without the popup.
 (globalThis as any).__acmPair = pair;
+(globalThis as any).__acmSweep = (now?: number) => sweepIdle(now);
 (globalThis as any).__acmStatus = () => ({ status, lastError });

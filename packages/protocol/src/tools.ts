@@ -82,11 +82,12 @@ export const TOOLS: ToolDef[] = [
     name: "tabs_context",
     title: "Get session tabs",
     description:
-      "Get the tabs in this session's Chrome tab group (id, url, title, active). Returns the tabIds the other tab tools accept. Each agent session gets its own tab group so its work stays separate from the user's tabs. Set createIfEmpty to open a blank tab in a new group when there is none. Set all=true to list every open tab in the browser.",
+      "Get the tabs in this session's Chrome tab group (id, url, title, active). Returns the tabIds the other tab tools accept. Each agent session gets its own tab group in a background Chrome window, so its work stays separate from the user's tabs and never interrupts them. Set createIfEmpty to open a blank tab in a new group when there is none. Set all=true to list every open tab in the browser.",
     inputSchema: obj({
       createIfEmpty: { type: "boolean", description: "Create the group with a new tab if the session has none. Default true." },
       task: { type: "string", description: "A 2-4 word name for what you are doing, such as \"Fix checkout bug\" or \"Compare flight prices\". Your tab group is renamed to it so the user can tell your tabs apart. Pass it on your first call." },
       all: { type: "boolean", description: "List every tab in the browser, not only this session's group." },
+      private: { type: "boolean", description: "true: work in a private (incognito) window with no cookies or logins, for logged-out browsing such as asking chatgpt.com a question as an anonymous visitor. false: go back to the normal window with the user's logins. Switching starts a new tab group. Omit to keep the current mode." },
     }),
     annotations: { readOnlyHint: true },
   },
@@ -97,7 +98,8 @@ export const TOOLS: ToolDef[] = [
       "Open a new tab in the user's own Chrome, inside this session's tab group, and make it the session's current tab. Optionally load a URL there, the same as typing it in the address bar (this is not an API call).",
     inputSchema: obj({
       url: { type: "string", description: "URL to open. Default about:blank." },
-      active: { type: "boolean", description: "Focus the tab in its window. Default false (work happens in the background)." },
+      active: { type: "boolean", description: "Make it the visible tab in your agent window. Default false. It never raises the window over the user's work." },
+      private: { type: "boolean", description: "true: work in a private (incognito) window with no cookies or logins, for logged-out browsing such as asking chatgpt.com a question as an anonymous visitor. false: go back to the normal window with the user's logins. Switching starts a new tab group. Omit to keep the current mode." },
       task: { type: "string", description: "A 2-4 word name for what you are doing, such as \"Fix checkout bug\" or \"Compare flight prices\". Your tab group is renamed to it so the user can tell your tabs apart. Pass it on your first call." },
     }),
   },
@@ -112,14 +114,14 @@ export const TOOLS: ToolDef[] = [
     name: "tabs_select",
     title: "Switch tab",
     description:
-      "Make a tab this session's current tab. Pass adopt=true to move a user's tab into the session group. Pass focus=true to also bring it to the front.",
+      "Make a tab this session's current tab. Pass adopt=true to move a user's tab into the session group. Pass focus=true to also make it the visible tab in its window (the window is never raised over the user's work).",
     inputSchema: obj({ tabId: { ...tabId, description: "Tab to switch to." }, adopt: { type: "boolean" }, focus: { type: "boolean" } }, ["tabId"]),
   },
   {
     name: "tab_groups",
     title: "Manage tab groups",
     description:
-      "List, create, rename, recolor, collapse or ungroup Chrome tab groups. action=list returns every group. action=update changes title/color/collapsed of a group (defaults to this session's group). action=create groups the given tabIds (or the current tab) into a new group. action=ungroup removes tabs from their group. action=move moves tabIds into a group. action=close closes every tab in a group (default: this session's group).",
+      "List, create, rename, recolor, collapse or ungroup Chrome tab groups. action=list returns every group. action=update changes title/color/collapsed of a group (defaults to this session's group). action=create groups the given tabIds (or the current tab) into a new group. action=ungroup removes tabs from their group. action=move moves tabIds into a group. action=close closes every tab in a group (default: this session's group). Call action=close when your job is done so your tabs stop using memory; idle groups are also closed automatically after an hour.",
     inputSchema: obj(
       {
         action: { type: "string", enum: ["list", "create", "update", "ungroup", "move", "close"] },

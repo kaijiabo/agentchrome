@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Agent Chrome",
   "short_name": "Agent Chrome",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Let your AI coding agent use your real, signed-in Chrome. It works in its own tab group while you watch.",
   "minimum_chrome_version": "120",
   "permissions": [

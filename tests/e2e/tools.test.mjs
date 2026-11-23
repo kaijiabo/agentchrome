@@ -308,6 +308,32 @@ test("gif_creator records and exports an animated GIF", async () => {
   assert.match(r.text, /GIF: \d+ frames/);
 });
 
+test("agent tabs live in a background window and never change the user's tab", async () => {
+  const state = () =>
+    browser.sw.evaluate(async () => {
+      const { agentWindowId } = await chrome.storage.local.get("agentWindowId");
+      const wins = await chrome.windows.getAll({ populate: true });
+      const user = wins.find((w) => w.id !== agentWindowId && !w.incognito);
+      return { agentWindowId, userWindowId: user?.id, userActive: user?.tabs.find((t) => t.active)?.id, userTabs: user?.tabs.length };
+    });
+  const before = await state();
+  assert.ok(before.agentWindowId !== undefined, "agent window exists");
+  assert.notEqual(before.agentWindowId, before.userWindowId);
+  const created = JSON.parse((await mcp.call("tabs_create", { url: `${fixture.url}/second` })).text).created;
+  const t0 = Date.now();
+  const shot = await mcp.call("computer", { action: "screenshot" });
+  assert.equal(shot.images.length, 1);
+  assert.ok(Date.now() - t0 < 3000, `background-tab screenshot took ${Date.now() - t0}ms`);
+  await mcp.call("tabs_select", { tabId: created.tabId, focus: true });
+  const groupWindow = await browser.sw.evaluate(async (id) => (await chrome.tabs.get(id)).windowId, created.tabId);
+  assert.equal(groupWindow, before.agentWindowId);
+  const after = await state();
+  assert.equal(after.userActive, before.userActive, "user's active tab unchanged");
+  assert.equal(after.userTabs, before.userTabs, "no tabs opened in the user's window");
+  await mcp.call("tabs_close", { tabId: created.tabId });
+  await mcp.call("tabs_select", { tabId });
+});
+
 test("Stop in the browser pauses the session until resumed", async () => {
   const extId = browser.sw.url().split("/")[2];
   const popup = await browser.context.newPage();
