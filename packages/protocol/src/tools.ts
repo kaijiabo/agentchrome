@@ -121,7 +121,7 @@ export const TOOLS: ToolDef[] = [
     name: "tab_groups",
     title: "Manage tab groups",
     description:
-      "List, create, rename, recolor, collapse or ungroup Chrome tab groups. action=list returns every group. action=update changes title/color/collapsed of a group (defaults to this session's group). action=create groups the given tabIds (or the current tab) into a new group. action=ungroup removes tabs from their group. action=move moves tabIds into a group. action=close closes every tab in a group (default: this session's group). Call action=close when your job is done so your tabs stop using memory; idle groups are also closed automatically after an hour.",
+      "List, create, rename, recolor, collapse or ungroup Chrome tab groups. action=list returns every group. action=update changes title/color/collapsed of a group (defaults to this session's group). action=create groups the given tabIds (or the current tab) into a new group. action=ungroup removes tabs from their group. action=move moves tabIds into a group. action=close closes every tab in a group (default: this session's group). Call action=close when your job is done so your tabs stop using memory.",
     inputSchema: obj(
       {
         action: { type: "string", enum: ["list", "create", "update", "ungroup", "move", "close"] },

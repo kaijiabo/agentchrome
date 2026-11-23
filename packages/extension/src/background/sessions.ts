@@ -33,7 +33,7 @@ export function prettyClient(client: string): string {
 let cache: Record<string, SessionState> | null = null;
 
 // Sessions live in storage.local so they survive extension updates, reloads and Chrome restarts.
-// Entries are removed when their tab group closes, when idle for a day, or when their group is gone at startup.
+// Entries are removed once their tab group is gone and they have been idle for a day.
 async function load(): Promise<Record<string, SessionState>> {
   if (!cache) {
     cache = ((await chrome.storage.local.get("sessions")).sessions as Record<string, SessionState>) ?? {};
@@ -49,11 +49,12 @@ async function save() {
 /** Drop stale entries and forget groups/tabs that no longer exist. */
 async function reconcile(all: Record<string, SessionState>) {
   for (const [id, s] of Object.entries(all)) {
-    if (Date.now() - s.lastActive > 86_400_000) {
+    if (s.groupId !== undefined && !(await groupAlive(s.groupId))) s.groupId = undefined;
+    // Forget an old session only once its tabs are gone, so the idle sweep can still close a group it left open.
+    if (s.groupId === undefined && Date.now() - s.lastActive > 86_400_000) {
       delete all[id];
       continue;
     }
-    if (s.groupId !== undefined && !(await groupAlive(s.groupId))) s.groupId = undefined;
     if (s.currentTabId !== undefined && !(await chrome.tabs.get(s.currentTabId).catch(() => null))) s.currentTabId = undefined;
   }
   await chrome.storage.local.set({ sessions: all });
@@ -97,7 +98,7 @@ export async function getSession(info: SessionInfo): Promise<SessionState> {
       s.currentTabId = (await chrome.tabs.query({ groupId: orphan.id }))[0]?.id;
     }
     // Forget sessions idle for more than a day.
-    for (const [k, v] of Object.entries(all)) if (Date.now() - v.lastActive > 86_400_000) delete all[k];
+    for (const [k, v] of Object.entries(all)) if (v.groupId === undefined && Date.now() - v.lastActive > 86_400_000) delete all[k];
   }
   s.lastActive = Date.now();
   await save();
@@ -285,13 +286,10 @@ export async function resolveTab(s: SessionState, tabId: unknown, createIfEmpty 
 }
 
 // ---------------- cleanup ----------------
-// Agents often finish without closing their tabs. Idle groups are put to sleep, then closed, so stale pages
-// don't pile up and eat memory. A group the user is looking at, or a paused one (the user took over), is left alone.
+// Agents close their own groups when done (the instructions tell them to). As a safety net that never removes
+// anything, idle agent tabs are unloaded from memory; they stay open and reload when used again.
 export const IDLE = {
-  /** Unload idle agent tabs from memory (they reload when used again). */
   discardAfterMs: 10 * 60_000,
-  /** Close idle agent tab groups. */
-  closeAfterMs: 60 * 60_000,
 };
 
 async function userIsViewing(groupId: number): Promise<boolean> {
@@ -299,28 +297,14 @@ async function userIsViewing(groupId: number): Promise<boolean> {
   return Boolean(w?.focused && w.tabs?.some((t) => t.active && t.groupId === groupId));
 }
 
-async function closeGroup(s: SessionState) {
-  const tabs = await chrome.tabs.query({ groupId: s.groupId! });
-  if (tabs.length) await chrome.tabs.remove(tabs.map((t) => t.id!)).catch(() => {});
-  s.groupId = undefined;
-  s.currentTabId = undefined;
-  await updateSession(s);
-}
-
 /** Returns what it did, for tests and logs. */
-export async function sweepIdle(now = Date.now()): Promise<{ discarded: number; closed: string[] }> {
-  const out = { discarded: 0, closed: [] as string[] };
+export async function sweepIdle(now = Date.now()): Promise<{ discarded: number }> {
+  const out = { discarded: 0 };
   const live: SessionState[] = [];
   for (const s of await allSessions()) if (await groupAlive(s.groupId)) live.push(s);
   for (const s of live) {
     if (await userIsViewing(s.groupId!)) continue;
-    const idle = now - s.lastActive;
-    if (!s.paused && idle > IDLE.closeAfterMs) {
-      out.closed.push(s.title);
-      await closeGroup(s);
-      continue;
-    }
-    if (idle > IDLE.discardAfterMs) {
+    if (now - s.lastActive > IDLE.discardAfterMs) {
       for (const t of await chrome.tabs.query({ groupId: s.groupId! })) {
         if (t.active || t.discarded || t.audible) continue;
         const d = await chrome.tabs.discard(t.id!).catch(() => undefined);

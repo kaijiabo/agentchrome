@@ -1,4 +1,4 @@
-// Idle agent groups are unloaded, then closed, and the number of open agent groups is capped.
+// Idle agent tabs are unloaded from memory; groups are only closed by the agent.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { launchBrowser, mcpClient, signup, startFixture } from "./harness.mjs";
@@ -29,7 +29,6 @@ test("idle tabs are unloaded and wake up when the agent uses them again", async 
   assert.equal((await sweep(0)).discarded, 0, "nothing happens to fresh groups");
   const r = await sweep(11 * MIN);
   assert.ok(r.discarded >= 1, JSON.stringify(r));
-  assert.equal(r.closed.length, 0);
   const discarded = await browser.sw.evaluate(async (id) => {
     const { tabAliases = {} } = await chrome.storage.local.get("tabAliases");
     return (await chrome.tabs.get(tabAliases[id] ?? id)).discarded;
@@ -40,15 +39,13 @@ test("idle tabs are unloaded and wake up when the agent uses them again", async 
   assert.match(text.text, /Second/);
 });
 
-test("groups idle for an hour are closed and the agent gets a fresh one", async () => {
+test("idle groups are never closed automatically", async () => {
   const before = await groupCount();
   assert.ok(before >= 1);
-  const r = await sweep(61 * MIN);
-  assert.deepEqual(r.closed, ["Idle check"]);
-  assert.equal(await groupCount(), before - 1);
-  // The agent can carry on: it gets a fresh group.
+  await sweep(24 * 60 * MIN);
+  assert.equal(await groupCount(), before);
   const ctx = JSON.parse((await mcp.call("tabs_context")).text);
-  assert.equal(ctx.tabs.length, 1);
+  assert.match(ctx.whenDone, /tab_groups action=close/);
 });
 
 test("many busy agents in parallel keep all their groups", async () => {
@@ -59,7 +56,6 @@ test("many busy agents in parallel keep all their groups", async () => {
   }
   const before = await groupCount();
   assert.ok(before >= 8);
-  const r = await sweep(30 * MIN);
-  assert.equal(r.closed.length, 0, JSON.stringify(r));
+  await sweep(30 * MIN);
   assert.equal(await groupCount(), before);
 });

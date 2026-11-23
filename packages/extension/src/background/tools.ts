@@ -216,6 +216,7 @@ const handlers: Record<string, (a: Args, c: Ctx) => Promise<CallToolResult>> = {
             group: group ? { groupId: group.id, title: group.title, color: group.color } : null,
             currentTabId: session.currentTabId,
             tabs: tabs.map((t) => ({ tabId: t.id, title: t.title, url: t.url ?? t.pendingUrl, current: t.id === session.currentTabId })),
+            whenDone: "Close your tabs with tab_groups action=close when your job is finished, unless the user wants to see the result.",
           },
           null,
           1,
