@@ -16,6 +16,8 @@ export interface SessionState {
   groupId?: number;
   windowId?: number;
   currentTabId?: number;
+  /** Work in a private (incognito) window: no cookies or logins from the profile. */
+  private?: boolean;
   paused?: boolean;
   /** "stop" (Stop button) or "debugger" (Cancel on Chrome's debugging bar). */
   pausedReason?: string;
@@ -31,7 +33,7 @@ export function prettyClient(client: string): string {
 let cache: Record<string, SessionState> | null = null;
 
 // Sessions live in storage.local so they survive extension updates, reloads and Chrome restarts.
-// Entries are removed when their tab group closes, when idle for a day, or when their group is gone at startup.
+// Entries are removed once their tab group is gone and they have been idle for a day.
 async function load(): Promise<Record<string, SessionState>> {
   if (!cache) {
     cache = ((await chrome.storage.local.get("sessions")).sessions as Record<string, SessionState>) ?? {};
@@ -47,11 +49,12 @@ async function save() {
 /** Drop stale entries and forget groups/tabs that no longer exist. */
 async function reconcile(all: Record<string, SessionState>) {
   for (const [id, s] of Object.entries(all)) {
-    if (Date.now() - s.lastActive > 86_400_000) {
+    if (s.groupId !== undefined && !(await groupAlive(s.groupId))) s.groupId = undefined;
+    // Forget an old session only once its tabs are gone, so the idle sweep can still close a group it left open.
+    if (s.groupId === undefined && Date.now() - s.lastActive > 86_400_000) {
       delete all[id];
       continue;
     }
-    if (s.groupId !== undefined && !(await groupAlive(s.groupId))) s.groupId = undefined;
     if (s.currentTabId !== undefined && !(await chrome.tabs.get(s.currentTabId).catch(() => null))) s.currentTabId = undefined;
   }
   await chrome.storage.local.set({ sessions: all });
@@ -95,7 +98,7 @@ export async function getSession(info: SessionInfo): Promise<SessionState> {
       s.currentTabId = (await chrome.tabs.query({ groupId: orphan.id }))[0]?.id;
     }
     // Forget sessions idle for more than a day.
-    for (const [k, v] of Object.entries(all)) if (Date.now() - v.lastActive > 86_400_000) delete all[k];
+    for (const [k, v] of Object.entries(all)) if (v.groupId === undefined && Date.now() - v.lastActive > 86_400_000) delete all[k];
   }
   s.lastActive = Date.now();
   await save();
@@ -136,17 +139,60 @@ async function groupAlive(groupId?: number) {
   return chrome.tabGroups.get(groupId).then(() => true, () => false);
 }
 
-async function targetWindow(s: SessionState): Promise<number> {
+// Agents work in one shared background window, so they never swap the tab the user is looking at
+// and never pull Chrome in front of other apps. It is a normal window of this profile, so it has the same logins.
+// Sessions that ask for privacy get a second shared window that is incognito.
+const creating = new Map<boolean, Promise<chrome.windows.Window>>();
+const windowKey = (priv: boolean) => (priv ? "privateWindowId" : "agentWindowId");
+
+export async function isAgentWindow(windowId: number): Promise<boolean> {
+  const st = await chrome.storage.local.get(["agentWindowId", "privateWindowId"]);
+  return windowId === st.agentWindowId || windowId === st.privateWindowId;
+}
+
+async function agentWindow(priv: boolean): Promise<{ id: number; blankTabId?: number }> {
+  const key = windowKey(priv);
+  const stored = (await chrome.storage.local.get(key))[key] as number | undefined;
+  if (stored !== undefined) {
+    const w = await chrome.windows.get(stored).catch(() => null);
+    if (w && w.type === "normal" && w.incognito === priv) return { id: w.id! };
+  }
+  if (priv && !(await chrome.extension.isAllowedIncognitoAccess())) {
+    throw new Error(
+      `Private windows are turned off for Agent Chrome. Ask the user to open chrome://extensions/?id=${chrome.runtime.id} and turn on "Allow in Incognito", then try again.`,
+    );
+  }
+  let p = creating.get(priv);
+  if (!p) {
+    p = chrome.windows
+      .create({ focused: false, state: "normal", incognito: priv, url: "about:blank" })
+      .then(async (w) => {
+        await chrome.storage.local.set({ [key]: w!.id });
+        return w!;
+      })
+      .finally(() => creating.delete(priv));
+    creating.set(priv, p);
+  }
+  const w = await p;
+  return { id: w.id!, blankTabId: w.tabs?.[0]?.id };
+}
+
+async function targetWindow(s: SessionState): Promise<{ id: number; blankTabId?: number }> {
   if (s.windowId !== undefined) {
     const w = await chrome.windows.get(s.windowId).catch(() => null);
-    if (w && w.type === "normal") return w.id!;
+    if (w && w.type === "normal" && w.incognito === Boolean(s.private)) return { id: w.id! };
   }
-  const w = await chrome.windows.getLastFocused({ windowTypes: ["normal"] }).catch(() => null);
-  if (w?.id !== undefined && w.type === "normal") return w.id;
-  const all = await chrome.windows.getAll({ windowTypes: ["normal"] });
-  if (all[0]?.id !== undefined) return all[0].id;
-  const created = await chrome.windows.create({ focused: false, url: "about:blank" });
-  return created!.id!;
+  return agentWindow(Boolean(s.private));
+}
+
+/** Switch a session between normal and private browsing. Switching starts a fresh tab group in the other window. */
+export async function setPrivate(s: SessionState, want: unknown): Promise<void> {
+  if (want === undefined || Boolean(want) === Boolean(s.private)) return;
+  s.private = Boolean(want);
+  s.groupId = undefined;
+  s.windowId = undefined;
+  s.currentTabId = undefined;
+  await updateSession(s);
 }
 
 /** Put a tab into the session's group, creating and naming the group when needed. */
@@ -168,9 +214,15 @@ export async function ensureInGroup(s: SessionState, tabId: number): Promise<num
 }
 
 export async function createTab(s: SessionState, url = "about:blank", active = false): Promise<chrome.tabs.Tab> {
-  let windowId = await targetWindow(s);
-  if (await groupAlive(s.groupId)) windowId = (await chrome.tabGroups.get(s.groupId!)).windowId;
-  const tab = await chrome.tabs.create({ url, active, windowId });
+  let { id: windowId, blankTabId } = await targetWindow(s);
+  if (await groupAlive(s.groupId)) {
+    windowId = (await chrome.tabGroups.get(s.groupId!)).windowId;
+    blankTabId = undefined;
+  }
+  // A new agent window opens with one blank tab: use it rather than leaving it behind.
+  const tab = blankTabId !== undefined
+    ? await chrome.tabs.update(blankTabId, { url, active: true }).then((t) => t!)
+    : await chrome.tabs.create({ url, active, windowId });
   await ensureInGroup(s, tab.id!);
   s.currentTabId = tab.id!;
   await updateSession(s);
@@ -182,17 +234,46 @@ export async function groupTabs(s: SessionState): Promise<chrome.tabs.Tab[]> {
   return chrome.tabs.query({ groupId: s.groupId });
 }
 
+async function addAlias(from: number, to: number) {
+  const { tabAliases = {} } = (await chrome.storage.local.get("tabAliases")) as { tabAliases?: Record<string, number> };
+  for (const k of Object.keys(tabAliases)) if (tabAliases[k] === from) tabAliases[k] = to;
+  tabAliases[from] = to;
+  const keys = Object.keys(tabAliases);
+  for (const k of keys.slice(0, Math.max(0, keys.length - 500))) delete tabAliases[k];
+  await chrome.storage.local.set({ tabAliases });
+}
+
+/** The tab's current id, following ids Chrome replaced when it unloaded the tab. */
+export async function currentTabId(id: number): Promise<number> {
+  if (await chrome.tabs.get(id).then(() => true, () => false)) return id;
+  const { tabAliases = {} } = (await chrome.storage.local.get("tabAliases")) as { tabAliases?: Record<string, number> };
+  return tabAliases[id] ?? id;
+}
+
+/** A tab unloaded by the idle sweep reloads before the agent uses it again. */
+async function wake(t: chrome.tabs.Tab): Promise<number> {
+  if (t.discarded) {
+    await chrome.tabs.reload(t.id!);
+    for (let i = 0; i < 100; i++) {
+      const now = await chrome.tabs.get(t.id!).catch(() => null);
+      if (!now || now.status === "complete") break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  }
+  return t.id!;
+}
+
 /** Resolve which tab a call targets. */
 export async function resolveTab(s: SessionState, tabId: unknown, createIfEmpty = true): Promise<number> {
   if (typeof tabId === "number") {
-    await chrome.tabs.get(tabId).catch(() => {
+    const t = await chrome.tabs.get(await currentTabId(tabId)).catch(() => {
       throw new Error(`Tab ${tabId} does not exist. Call tabs_context for valid tab IDs.`);
     });
-    return tabId;
+    return wake(t);
   }
   if (s.currentTabId !== undefined) {
     const t = await chrome.tabs.get(s.currentTabId).catch(() => null);
-    if (t) return t.id!;
+    if (t) return wake(t);
   }
   const inGroup = await groupTabs(s);
   if (inGroup[0]) {
@@ -202,4 +283,43 @@ export async function resolveTab(s: SessionState, tabId: unknown, createIfEmpty 
   }
   if (!createIfEmpty) throw new Error("This session has no tabs yet. Call tabs_create or navigate first.");
   return (await createTab(s)).id!;
+}
+
+// ---------------- cleanup ----------------
+// Agents close their own groups when done (the instructions tell them to). As a safety net that never removes
+// anything, idle agent tabs are unloaded from memory; they stay open and reload when used again.
+export const IDLE = {
+  discardAfterMs: 10 * 60_000,
+};
+
+async function userIsViewing(groupId: number): Promise<boolean> {
+  const w = await chrome.windows.getLastFocused({ populate: true }).catch(() => null);
+  return Boolean(w?.focused && w.tabs?.some((t) => t.active && t.groupId === groupId));
+}
+
+/** Returns what it did, for tests and logs. */
+export async function sweepIdle(now = Date.now()): Promise<{ discarded: number }> {
+  const out = { discarded: 0 };
+  const live: SessionState[] = [];
+  for (const s of await allSessions()) if (await groupAlive(s.groupId)) live.push(s);
+  for (const s of live) {
+    if (await userIsViewing(s.groupId!)) continue;
+    if (now - s.lastActive > IDLE.discardAfterMs) {
+      for (const t of await chrome.tabs.query({ groupId: s.groupId! })) {
+        if (t.active || t.discarded || t.audible) continue;
+        const d = await chrome.tabs.discard(t.id!).catch(() => undefined);
+        if (!d) continue;
+        out.discarded++;
+        // Chrome can give an unloaded tab a new id: keep the agent's old id working.
+        if (d.id !== t.id) {
+          await addAlias(t.id!, d.id!);
+          if (s.currentTabId === t.id) {
+            s.currentTabId = d.id;
+            await updateSession(s);
+          }
+        }
+      }
+    }
+  }
+  return out;
 }

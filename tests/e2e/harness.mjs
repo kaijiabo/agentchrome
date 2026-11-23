@@ -79,7 +79,7 @@ export async function signup() {
 /** Launch a fresh Chromium profile with the extension and pair it to the account. */
 export async function launchBrowser(apiKey, name, opts = {}) {
   const userDataDir = mkdtempSync(join(tmpdir(), "acm-e2e-"));
-  const headless = process.env.HEADLESS === "1";
+  const headless = process.env.HEADED !== "1"; // windowless by default so test runs never pop over the user's work
   const context = await chromium.launchPersistentContext(userDataDir, {
     headless,
     channel: "chromium",

@@ -1,6 +1,7 @@
 // Helpers that talk to a tab: content-script calls, screenshots, coordinate mapping and input events.
 
 import * as cdp from "./cdp";
+import { isAgentWindow } from "./sessions";
 import { editingCommands, modifierBits, MOD, parseCombo } from "./keys";
 
 export async function content<T = any>(tabId: number, name: string, args: unknown = {}): Promise<T> {
@@ -117,6 +118,12 @@ async function ensureRendered(tabId: number) {
   // Background tabs are not painted; captureScreenshot then hangs. Bring the tab to front of its window only if needed.
   const tab = await chrome.tabs.get(tabId);
   if (!tab.active) {
+    // In the agents' own window, switching tabs disturbs nobody: show the tab before capturing.
+    if (await isAgentWindow(tab.windowId)) {
+      await chrome.tabs.update(tabId, { active: true });
+      await new Promise((r) => setTimeout(r, 150));
+      return tab;
+    }
     try {
       await cdp.send(tabId, "Emulation.setFocusEmulationEnabled", { enabled: true });
     } catch {}

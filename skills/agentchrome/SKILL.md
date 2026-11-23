@@ -15,6 +15,23 @@ The `agentchrome` MCP server controls the user's own Chrome through an extension
 4. Act with refs: `computer action=left_click ref=ref_12`, `form_input ref=... value=...`, `computer action=type text=...`, `computer action=key text=Enter`.
 5. Verify with `computer action=screenshot` (coordinates you click must come from the latest screenshot).
 
+## Where your tabs live
+
+- Your tab group opens in a **separate background Chrome window** of the same profile, so you have the user's logins and the user keeps working in their own windows undisturbed. Never try to bring Chrome to the front.
+- The user can click that window to watch you, or press **Stop** in the extension to take over.
+
+## Clean up when you finish
+
+- When the job is done, close your tabs: `tab_groups action=close`. Skip this only if the user asked to look at the result.
+- Nothing closes your tabs for you. Agent Chrome only unloads tabs idle for 10 minutes from memory; they stay open and reload when you use them again.
+
+## Private (incognito) browsing
+
+- Pass `private=true` to `tabs_context` or `tabs_create` to work in an incognito window: no cookies, no logins, wiped when it closes. Use it for logged-out checks, such as asking chatgpt.com a question as an anonymous visitor (it is a real Chrome window, so sites block it far less than a headless browser).
+- `private=false` goes back to the normal window. Switching starts a new tab group; `tabs_context` reports `"private": true|false`.
+- If the call says private windows are turned off, give the user the steps from the error ("Allow in Incognito" on the extension's details page), then retry.
+- If a site shows a "verify you are human" check, ask the user to solve it in that window, then continue.
+
 ## Picking a browser
 
 - `list_browsers` shows each paired Chrome profile and whether it is online.

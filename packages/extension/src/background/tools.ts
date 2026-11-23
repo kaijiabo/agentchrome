@@ -4,7 +4,7 @@ import { modifierBits } from "./keys";
 import * as page from "./page";
 import * as rec from "./recording";
 import { gate, getConnection, getSettings } from "./settings";
-import { agentLabel, allSessions, createTab, ensureInGroup, getSession, groupTabs, nameGroup, resolveTab, sessionsForTab, updateSession, type SessionState } from "./sessions";
+import { agentLabel, allSessions, createTab, currentTabId, ensureInGroup, getSession, groupTabs, nameGroup, resolveTab, sessionsForTab, setPrivate, updateSession, type SessionState } from "./sessions";
 
 const text = (t: string): ContentBlock => ({ type: "text", text: t });
 const ok = (...blocks: ContentBlock[]): CallToolResult => ({ content: blocks });
@@ -184,6 +184,7 @@ async function uploadArtifact(blob: Blob, name: string): Promise<{ url?: string;
 
 const handlers: Record<string, (a: Args, c: Ctx) => Promise<CallToolResult>> = {
   async tabs_context(a, { session }) {
+    await setPrivate(session, a.private);
     if (a.task) await nameGroup(session, a.task);
     if (a.all) {
       const tabs = await chrome.tabs.query({});
@@ -211,9 +212,11 @@ const handlers: Record<string, (a: Args, c: Ctx) => Promise<CallToolResult>> = {
         JSON.stringify(
           {
             browser: conn.name,
+            private: Boolean(session.private),
             group: group ? { groupId: group.id, title: group.title, color: group.color } : null,
             currentTabId: session.currentTabId,
             tabs: tabs.map((t) => ({ tabId: t.id, title: t.title, url: t.url ?? t.pendingUrl, current: t.id === session.currentTabId })),
+            whenDone: "Close your tabs with tab_groups action=close when your job is finished, unless the user wants to see the result.",
           },
           null,
           1,
@@ -224,6 +227,7 @@ const handlers: Record<string, (a: Args, c: Ctx) => Promise<CallToolResult>> = {
 
   async tabs_create(a, { session, info }) {
     const url = a.url ? normalizeUrl(String(a.url)) : "about:blank";
+    await setPrivate(session, a.private);
     if (a.task) await nameGroup(session, a.task);
     if (a.url) await gate(url, agentLabel(session));
     // Open blank first and attach the debugger so console/network capture covers the first load.
@@ -250,10 +254,8 @@ const handlers: Record<string, (a: Args, c: Ctx) => Promise<CallToolResult>> = {
     if (a.adopt) await ensureInGroup(session, a.tabId);
     session.currentTabId = a.tabId;
     await updateSession(session);
-    if (a.focus) {
-      await chrome.tabs.update(a.tabId, { active: true });
-      await chrome.windows.update(tab.windowId, { focused: true });
-    }
+    // Show the tab inside its window, but never raise the window over what the user is doing.
+    if (a.focus) await chrome.tabs.update(a.tabId, { active: true });
     return ok(text(`Current tab is now ${a.tabId}: ${tab.title}`));
   },
 
@@ -830,6 +832,7 @@ export async function runTool(name: string, args: Args, info: SessionInfo, signa
   }
   const h = handlers[name];
   if (!h) return { content: [text(`Unknown tool ${name}`)], isError: true };
+  if (typeof args.tabId === "number") args.tabId = await currentTabId(args.tabId);
   let tabId: number | undefined;
   if (TAB_TOOLS.has(name)) {
     try {
