@@ -23,7 +23,7 @@ The `agentchrome` MCP server controls the user's own Chrome through an extension
 ## Clean up when you finish
 
 - When the job is done, close your tabs: `tab_groups action=close`. Skip this only if the user asked to look at the result.
-- Agent Chrome also cleans up after you: tabs idle for 10 minutes are unloaded from memory (they reload when you use them again), groups idle for an hour are closed, and only the 5 most recently used agent groups stay open. A group the user is viewing or has paused is left alone.
+- Agent Chrome also cleans up after you: tabs idle for 10 minutes are unloaded from memory (they reload when you use them again) and groups idle for an hour are closed. Busy groups are never touched, however many agents run at once. A group the user is viewing or has paused is left alone.
 
 ## Private (incognito) browsing
 

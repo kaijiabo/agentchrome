@@ -51,14 +51,15 @@ test("groups idle for an hour are closed and the agent gets a fresh one", async 
   assert.equal(ctx.tabs.length, 1);
 });
 
-test("only the 5 most recently used agent groups stay open", async () => {
-  for (let i = 0; i < 6; i++) {
+test("many busy agents in parallel keep all their groups", async () => {
+  for (let i = 0; i < 7; i++) {
     const c = await mcpClient(account.apiKey, `agent-${i}`);
     extra.push(c);
     await c.call("tabs_context", { task: `Job ${i}` });
   }
-  assert.ok((await groupCount()) >= 7);
-  const r = await sweep(6 * MIN);
-  assert.equal(await groupCount(), 5, JSON.stringify(r));
-  assert.ok(r.closed.includes("Idle check") || r.closed.includes("Claude Code"), JSON.stringify(r));
+  const before = await groupCount();
+  assert.ok(before >= 8);
+  const r = await sweep(30 * MIN);
+  assert.equal(r.closed.length, 0, JSON.stringify(r));
+  assert.equal(await groupCount(), before);
 });

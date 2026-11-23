@@ -292,10 +292,6 @@ export const IDLE = {
   discardAfterMs: 10 * 60_000,
   /** Close idle agent tab groups. */
   closeAfterMs: 60 * 60_000,
-  /** Keep at most this many agent groups open; close the longest-idle beyond it. */
-  maxGroups: 5,
-  /** Never close a group for the group cap if it was used this recently. */
-  capGraceMs: 5 * 60_000,
 };
 
 async function userIsViewing(groupId: number): Promise<boolean> {
@@ -316,12 +312,10 @@ export async function sweepIdle(now = Date.now()): Promise<{ discarded: number; 
   const out = { discarded: 0, closed: [] as string[] };
   const live: SessionState[] = [];
   for (const s of await allSessions()) if (await groupAlive(s.groupId)) live.push(s);
-  live.sort((a, b) => b.lastActive - a.lastActive);
-  for (const [i, s] of live.entries()) {
+  for (const s of live) {
     if (await userIsViewing(s.groupId!)) continue;
     const idle = now - s.lastActive;
-    const overCap = i >= IDLE.maxGroups && idle > IDLE.capGraceMs;
-    if (!s.paused && (idle > IDLE.closeAfterMs || overCap)) {
+    if (!s.paused && idle > IDLE.closeAfterMs) {
       out.closed.push(s.title);
       await closeGroup(s);
       continue;
