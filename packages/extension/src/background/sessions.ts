@@ -73,6 +73,21 @@ chrome.tabGroups.onRemoved.addListener(async (group) => {
   if (changed) await save();
 });
 
+// A tab the user opens (Cmd+T, the + button) next to an agent's tab would join that agent's group.
+// Take it out, so the user's own tabs never mix with agent tabs.
+const NEW_TAB = /^(chrome:\/\/newtab\/?|chrome:\/\/new-tab-page\/?)$/;
+async function keepUserTabOut(tab: chrome.tabs.Tab) {
+  if (tab.id === undefined || tab.groupId === undefined || tab.groupId < 0) return;
+  if (!NEW_TAB.test(tab.pendingUrl || tab.url || "")) return;
+  const all = await load();
+  if (!Object.values(all).some((s) => s.groupId === tab.groupId)) return;
+  await chrome.tabs.ungroup(tab.id).catch(() => {});
+}
+chrome.tabs.onCreated.addListener((tab) => void keepUserTabOut(tab));
+chrome.tabs.onUpdated.addListener((_id, change, tab) => {
+  if (change.groupId !== undefined) void keepUserTabOut(tab);
+});
+
 export async function getSession(info: SessionInfo): Promise<SessionState> {
   const all = await load();
   let s = all[info.id];
