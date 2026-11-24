@@ -334,6 +334,23 @@ test("agent tabs live in a background window and never change the user's tab", a
   await mcp.call("tabs_select", { tabId });
 });
 
+test("a new tab the user opens next to an agent tab stays out of the agent's group", async () => {
+  const groupId = JSON.parse((await mcp.call("tabs_context")).text).group.groupId;
+  // Chrome puts a Cmd+T tab into the active tab's group; simulate that placement.
+  const result = await browser.sw.evaluate(async (gid) => {
+    const g = await chrome.tabGroups.get(gid);
+    const t = await chrome.tabs.create({ url: "chrome://newtab/", windowId: g.windowId, active: false });
+    await chrome.tabs.group({ groupId: gid, tabIds: [t.id] });
+    await new Promise((r) => setTimeout(r, 500));
+    const after = await chrome.tabs.get(t.id);
+    await chrome.tabs.remove(t.id);
+    return after.groupId;
+  }, groupId);
+  assert.equal(result, -1);
+  const ctx = JSON.parse((await mcp.call("tabs_context")).text);
+  assert.ok(ctx.tabs.every((t) => !/newtab/.test(t.url ?? "")));
+});
+
 test("Stop in the browser pauses the session until resumed", async () => {
   const extId = browser.sw.url().split("/")[2];
   const popup = await browser.context.newPage();
